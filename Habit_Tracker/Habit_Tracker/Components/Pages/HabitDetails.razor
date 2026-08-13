@@ -1,0 +1,67 @@
+@page "/habits/{HabitId:guid}"
+@using System.Security.Claims
+@using Habit_Tracker.Application.Queries
+
+@inject IHabitQueries HabitQueries
+
+<PageTitle>@(habit?.Name ?? "Habit")</PageTitle>
+
+@if (!isAuthenticated)
+{
+    <p><a href="Account/Login">Log in</a> to view this habit.</p>
+}
+else if (habit is null)
+{
+    <p>Habit not found.</p>
+}
+else
+{
+    <p><a href="/">&larr; Back to habits</a></p>
+    <h1>
+        @if (habit.IsCompletable)
+        {
+            <HabitProgressRing PercentComplete="habit.CompletionPercentage" />
+        }
+        @habit.Name
+    </h1>
+
+    @if (habit.CompletionMethod != Domain.Enums.HabitCompletionMethod.Total)
+    {
+        <ul class="habit-node-list">
+            <li>
+                <div class="habit-node-detail">
+                    <HabitNodeView Node="habit" />
+                </div>
+            </li>
+        </ul>
+    }
+    else
+    {
+        <HabitNodeView Node="habit" />
+    }
+    <AddEntryModal />
+}
+
+@code {
+    [Parameter]
+    public Guid HabitId { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private bool isAuthenticated;
+    private Guid userId;
+    private HabitTreeNodeDto? habit;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateTask;
+        var userIdClaim = authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        isAuthenticated = userIdClaim is not null && Guid.TryParse(userIdClaim, out userId);
+        if (isAuthenticated)
+        {
+            habit = await HabitQueries.GetHabitTreeAsync(HabitId, userId);
+        }
+    }
+}

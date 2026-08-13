@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "habit_tracker",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "Habit_Tracker/Habit_Tracker/Habit_Tracker.csproj"],
+      "port": 5231
+    }
+  ]
+}

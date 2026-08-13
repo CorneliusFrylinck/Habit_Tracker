@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: blazorapp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: blazorapp
+      POSTGRES_USER: blazorapp
+      POSTGRES_PASSWORD: blazorapp_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - blazorapp-pgdata:/var/lib/postgresql/data
+
+volumes:
+  blazorapp-pgdata:

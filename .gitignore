@@ -55,3 +55,10 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Visual Studio cache/options directory and per-user project settings
+.vs/
+*.user
+
+# Claude Code local (per-user) settings
+.claude/settings.local.json

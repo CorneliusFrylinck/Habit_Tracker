@@ -1,0 +1,28 @@
+@using System.Globalization
+
+<svg class="progress-ring" width="48" height="48" viewBox="0 0 48 48" role="img" aria-label="@($"{clampedPercent}% complete")">
+    <circle class="progress-ring__track" cx="24" cy="24" r="@RadiusValue" />
+    <circle class="progress-ring__fill" cx="24" cy="24" r="@RadiusValue"
+            stroke-dasharray="@CircumferenceValue"
+            stroke-dashoffset="@DashOffsetValue"
+            transform="rotate(-90 24 24)" />
+    <text x="24" y="28" text-anchor="middle" class="progress-ring__label">@clampedPercent%</text>
+</svg>
+
+@code {
+    // SVG numeric attributes require an invariant ("." decimal separator) format regardless of
+    // server locale - under a comma-decimal culture, the default ToString() would render e.g.
+    // "125,66", which SVG parses as a two-value dasharray and breaks the ring.
+    private const double Radius = 20;
+    private const double Circumference = 2 * Math.PI * Radius;
+
+    [Parameter]
+    public int PercentComplete { get; set; }
+
+    private int clampedPercent => Math.Clamp(PercentComplete, 0, 100);
+    private double DashOffset => Circumference - (clampedPercent / 100.0 * Circumference);
+
+    private static string RadiusValue => Radius.ToString(CultureInfo.InvariantCulture);
+    private static string CircumferenceValue => Circumference.ToString(CultureInfo.InvariantCulture);
+    private string DashOffsetValue => DashOffset.ToString(CultureInfo.InvariantCulture);
+}

@@ -1,0 +1,50 @@
+@* Single shared modal reused everywhere an "add entry" button appears (Home's top-level list
+   and the recursive HabitNodeView on the details page).
+   Opened via openAddEntryModal(id, isCompletable, completionMethod, unit, unitPlural):
+   Total-method habits and non-completable habits both get an Amount field - for Total it
+   rolls up into completion vs. TargetValue, for non-completable it's just recorded, uncounted.
+   Only "completable via sub-habits" (no total to measure against) falls back to a plain
+   "mark as completed" checkbox. *@
+
+<dialog id="add-entry-modal">
+    <h3>Add entry</h3>
+
+    <form id="add-entry-form" method="post">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnUrl" id="add-entry-return-url" />
+
+        <div id="add-entry-amount-wrapper" class="mb-3" style="display: none">
+            <label class="form-label" for="add-entry-amount" id="add-entry-amount-label">Amount</label>
+            <input type="number" name="amount" id="add-entry-amount" class="form-control" min="0" step="1" />
+        </div>
+
+        <div id="add-entry-completed-wrapper" class="mb-3" style="display: none">
+            <label class="form-label">
+                <input type="checkbox" name="isCompleted" value="true" id="add-entry-completed" />
+                Mark as completed
+            </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Track</button>
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-entry-modal').close()">Cancel</button>
+    </form>
+</dialog>
+
+<script>
+    function openAddEntryModal(habitId, isCompletable, completionMethod, unit, unitPlural) {
+        document.getElementById('add-entry-form').action = '/Habits/' + habitId + '/Entries';
+        document.getElementById('add-entry-return-url').value = window.location.pathname;
+        document.getElementById('add-entry-completed').checked = false;
+        document.getElementById('add-entry-amount').value = '';
+
+        var isTotal = completionMethod === 'Total';
+        var completable = isCompletable === 'true';
+        var showCheckbox = completable && !isTotal;
+
+        document.getElementById('add-entry-amount-wrapper').style.display = showCheckbox ? 'none' : 'block';
+        document.getElementById('add-entry-completed-wrapper').style.display = showCheckbox ? 'block' : 'none';
+        document.getElementById('add-entry-amount-label').textContent = unitPlural ? ('Amount (' + unitPlural + ')') : 'Amount';
+
+        document.getElementById('add-entry-modal').showModal();
+    }
+</script>

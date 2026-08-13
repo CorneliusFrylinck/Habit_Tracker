@@ -1,0 +1,259 @@
+@using System.ComponentModel.DataAnnotations
+@using Habit_Tracker.Application.Commands
+@using Habit_Tracker.Domain.Enums
+
+@inject IHabitCommands HabitCommands
+@inject NavigationManager NavigationManager
+
+<dialog id="edit-habit-modal">
+    <h3>Edit habit</h3>
+
+    <EditForm Model="EditInput" method="post" OnValidSubmit="UpdateHabit" OnInvalidSubmit="() => reopenEditModal = true" FormName="edit-habit">
+        <DataAnnotationsValidator />
+        <ValidationSummary class="text-danger" role="alert" />
+
+        @if (editErrorMessage is not null)
+        {
+            <div class="alert alert-danger" role="alert">@editErrorMessage</div>
+        }
+
+        <InputText type="hidden" @bind-Value="EditInput.HabitId" id="edit-habit-id" />
+        <InputText type="hidden" @bind-Value="EditInput.RemovedSubHabitIdsCsv" id="edit-removed-subhabits" />
+
+        <div class="form-floating mb-3">
+            <InputText @bind-Value="EditInput.Name" class="form-control" placeholder="Habit name" id="edit-name" />
+            <label>Name</label>
+            <ValidationMessage For="() => EditInput.Name" class="text-danger" />
+        </div>
+
+        <div class="checkbox mb-3" onchange="toggleEditCompletionFields()">
+            <label class="form-label">
+                <InputCheckbox @bind-Value="EditInput.IsCompletable" id="edit-completable" />
+                Completable
+            </label>
+        </div>
+
+        <div id="edit-completion-settings" class="mb-3" style="display: @(EditInput.IsCompletable ? "block" : "none")">
+            <label class="form-label d-block">Completed by</label>
+            <div onchange="toggleEditTotalFields()">
+                <InputRadioGroup @bind-Value="EditInput.CompletionMethod">
+                    <label class="form-check-label me-3">
+                        <InputRadio Value="HabitCompletionMethod.SubHabits" id="edit-method-subhabits" />
+                        Sub-habits
+                    </label>
+                    <label class="form-check-label">
+                        <InputRadio Value="HabitCompletionMethod.Total" id="edit-method-total" />
+                        A specified total
+                    </label>
+                </InputRadioGroup>
+            </div>
+
+            <div id="edit-total-settings" class="row g-2 mt-2" style="display: @(EditInput.CompletionMethod == HabitCompletionMethod.Total ? "flex" : "none")">
+                <div class="col-4">
+                    <label class="form-label">Target amount</label>
+                    <InputNumber @bind-Value="EditInput.TargetValue" class="form-control" id="edit-target" />
+                    <ValidationMessage For="() => EditInput.TargetValue" class="text-danger" />
+                </div>
+                <div class="col-4">
+                    <label class="form-label">Unit (singular)</label>
+                    <InputText @bind-Value="EditInput.Unit" class="form-control" id="edit-unit" />
+                    <ValidationMessage For="() => EditInput.Unit" class="text-danger" />
+                </div>
+                <div class="col-4">
+                    <label class="form-label">Unit (plural)</label>
+                    <InputText @bind-Value="EditInput.UnitPlural" class="form-control" id="edit-unit-plural" />
+                    <ValidationMessage For="() => EditInput.UnitPlural" class="text-danger" />
+                </div>
+                <div class="col-12 mt-2">
+                    <label class="form-label d-block">Target type</label>
+                    <InputRadioGroup @bind-Value="EditInput.TargetType">
+                        <label class="form-check-label me-3">
+                            <InputRadio Value="HabitTargetType.OnceOff" id="edit-target-type-onceoff" />
+                            Once-off total (accumulates across all entries)
+                        </label>
+                        <label class="form-check-label">
+                            <InputRadio Value="HabitTargetType.PerEntry" id="edit-target-type-perentry" />
+                            Per entry (each entry aims for this amount)
+                        </label>
+                    </InputRadioGroup>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label d-block">Sub-habits</label>
+            <div id="edit-subhabits-list" onchange="updateRemovedSubHabits()"></div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save changes</button>
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('edit-habit-modal').close()">Cancel</button>
+    </EditForm>
+</dialog>
+
+@if (reopenEditModal)
+{
+    <script>
+        document.getElementById('edit-habit-modal').showModal();
+    </script>
+}
+
+<script>
+    function toggleEditCompletionFields() {
+        var completable = document.getElementById('edit-completable').checked;
+        document.getElementById('edit-completion-settings').style.display = completable ? 'block' : 'none';
+    }
+    function toggleEditTotalFields() {
+        var isTotal = document.getElementById('edit-method-total').checked;
+        document.getElementById('edit-total-settings').style.display = isTotal ? 'flex' : 'none';
+    }
+    function updateRemovedSubHabits() {
+        var checked = document.querySelectorAll('#edit-subhabits-list input[type=checkbox]:checked');
+        document.getElementById('edit-removed-subhabits').value = Array.from(checked).map(function (c) { return c.value; }).join(',');
+    }
+
+    function openEditModal(button) {
+        var d = button.dataset;
+        document.getElementById('edit-habit-id').value = d.habitId;
+        document.getElementById('edit-name').value = d.name;
+        document.getElementById('edit-removed-subhabits').value = '';
+
+        var completable = d.completable === 'true';
+        document.getElementById('edit-completable').checked = completable;
+        document.getElementById('edit-completion-settings').style.display = completable ? 'block' : 'none';
+
+        var isTotal = d.method === 'Total';
+        document.getElementById('edit-method-subhabits').checked = !isTotal;
+        document.getElementById('edit-method-total').checked = isTotal;
+        document.getElementById('edit-total-settings').style.display = isTotal ? 'flex' : 'none';
+
+        document.getElementById('edit-target').value = d.target || '';
+        document.getElementById('edit-unit').value = d.unit || '';
+        document.getElementById('edit-unit-plural').value = d.unitPlural || '';
+
+        var isPerEntry = d.targetType === 'PerEntry';
+        document.getElementById('edit-target-type-onceoff').checked = !isPerEntry;
+        document.getElementById('edit-target-type-perentry').checked = isPerEntry;
+
+        var subHabits = JSON.parse(d.subhabits || '[]');
+        var container = document.getElementById('edit-subhabits-list');
+        container.innerHTML = '';
+        if (subHabits.length === 0) {
+            container.innerHTML = '<p class="text-muted">This habit has no sub-habits.</p>';
+        } else {
+            subHabits.forEach(function (sh) {
+                var label = document.createElement('label');
+                label.className = 'form-check-label d-block';
+                var checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'form-check-input me-2';
+                checkbox.value = sh.id;
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode('Remove "' + sh.name + '"'));
+                container.appendChild(label);
+            });
+        }
+
+        document.getElementById('edit-habit-modal').showModal();
+    }
+</script>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid UserId { get; set; }
+
+    [SupplyParameterFromForm(FormName = "edit-habit")]
+    private EditHabitInputModel EditInput { get; set; } = new();
+
+    private string? editErrorMessage;
+    private bool reopenEditModal;
+
+    private async Task UpdateHabit()
+    {
+        if (!Guid.TryParse(EditInput.HabitId, out var habitId))
+        {
+            editErrorMessage = "Invalid habit.";
+            reopenEditModal = true;
+            return;
+        }
+
+        var removedSubHabitIds = (EditInput.RemovedSubHabitIdsCsv ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => Guid.TryParse(s, out var id) ? id : (Guid?)null)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .ToList();
+
+        var completionMethod = EditInput.IsCompletable ? EditInput.CompletionMethod : (HabitCompletionMethod?)null;
+        var isTotal = completionMethod == HabitCompletionMethod.Total;
+
+        try
+        {
+            await HabitCommands.UpdateHabitAsync(new UpdateHabitRequest
+            {
+                HabitId = habitId,
+                UserId = UserId,
+                Name = EditInput.Name,
+                IsCompletable = EditInput.IsCompletable,
+                CompletionMethod = completionMethod,
+                TargetValue = isTotal ? EditInput.TargetValue : null,
+                Unit = isTotal ? EditInput.Unit : null,
+                UnitPlural = isTotal ? EditInput.UnitPlural : null,
+                TargetType = isTotal ? EditInput.TargetType : null,
+                RemovedSubHabitIds = removedSubHabitIds,
+            });
+
+            NavigationManager.NavigateTo("/", forceLoad: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            editErrorMessage = ex.Message;
+            reopenEditModal = true;
+        }
+    }
+
+    private sealed class EditHabitInputModel : IValidatableObject
+    {
+        public string HabitId { get; set; } = "";
+
+        [Required]
+        [StringLength(200)]
+        public string Name { get; set; } = "";
+
+        public bool IsCompletable { get; set; }
+
+        public HabitCompletionMethod CompletionMethod { get; set; } = HabitCompletionMethod.SubHabits;
+
+        public int? TargetValue { get; set; }
+
+        [StringLength(50)]
+        public string? Unit { get; set; }
+
+        [StringLength(50)]
+        public string? UnitPlural { get; set; }
+
+        public HabitTargetType TargetType { get; set; } = HabitTargetType.OnceOff;
+
+        public string? RemovedSubHabitIdsCsv { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (IsCompletable && CompletionMethod == HabitCompletionMethod.Total)
+            {
+                if (TargetValue is null or <= 0)
+                {
+                    yield return new ValidationResult("Enter a target amount greater than zero.", [nameof(TargetValue)]);
+                }
+
+                if (string.IsNullOrWhiteSpace(Unit))
+                {
+                    yield return new ValidationResult("Enter a unit (e.g. \"page\").", [nameof(Unit)]);
+                }
+
+                if (string.IsNullOrWhiteSpace(UnitPlural))
+                {
+                    yield return new ValidationResult("Enter a plural unit (e.g. \"pages\").", [nameof(UnitPlural)]);
+                }
+            }
+        }
+    }
+}

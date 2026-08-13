@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="Habit_Tracker/Habit_Tracker.Client/Habit_Tracker.Client.csproj" />
+  <Project Path="Habit_Tracker/Habit_Tracker/Habit_Tracker.csproj" />
+  <Project Path="Habit_Tracker/Habit_Tracker.Domain/Habit_Tracker.Domain.csproj" />
+  <Project Path="Habit_Tracker/Habit_Tracker.Application/Habit_Tracker.Application.csproj" />
+  <Project Path="Habit_Tracker/Habit_Tracker.Persistence/Habit_Tracker.Persistence.csproj" />
+  <Project Path="Habit_Tracker/Habit_Tracker.Tests/Habit_Tracker.Tests.csproj" />
+</Solution>

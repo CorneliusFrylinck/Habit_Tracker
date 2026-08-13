@@ -1,0 +1,128 @@
+@page "/"
+@using System.Security.Claims
+@using System.Text.Json
+@using Habit_Tracker.Application.Queries
+@using Habit_Tracker.Domain.Enums
+
+@inject IHabitQueries HabitQueries
+
+<PageTitle>Home</PageTitle>
+
+@if (isAuthenticated)
+{
+    <h2>Your habits</h2>
+
+    <AddHabitModal Habits="habits" UserId="userId" />
+    <EditHabitModal UserId="userId" />
+    <AddEntryModal />
+
+    @if (habits is { Count: 0 })
+    {
+        <p>You haven't added any habits yet.</p>
+    }
+    else if (habits is not null)
+    {
+        <ul class="habit-list">
+            @foreach (var habit in habits.Where(h => h.ParentHabitId is null))
+            {
+                var subHabits = GetSubHabits(habit.Id);
+                <li class="habit-list-item">
+                    @if (habit.IsCompletable)
+                    {
+                        <HabitProgressRing PercentComplete="habit.CompletionPercentage" />
+                    }
+                    <span class="habit-name">@habit.Name</span>
+                    @if (habit.CompletionMethod == HabitCompletionMethod.Total)
+                    {
+                        <span class="habit-meta">
+                            @habit.TargetValue @(habit.TargetValue == 1 ? habit.Unit : habit.UnitPlural)
+                            @(habit.TargetType == HabitTargetType.PerEntry ? "per entry" : "total")
+                        </span>
+                    }
+                    else if (habit.CompletionMethod == HabitCompletionMethod.SubHabits)
+                    {
+                        <span class="habit-meta">via sub-habits</span>
+                    }
+
+                    <div class="habit-actions">
+                        <a href="/habits/@habit.Id" class="icon-btn" title="View">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </a>
+
+                        <button type="button" class="icon-btn" title="Edit"
+                                data-habit-id="@habit.Id"
+                                data-name="@habit.Name"
+                                data-completable="@habit.IsCompletable.ToString().ToLowerInvariant()"
+                                data-method="@habit.CompletionMethod"
+                                data-target="@habit.TargetValue"
+                                data-unit="@habit.Unit"
+                                data-unit-plural="@habit.UnitPlural"
+                                data-target-type="@habit.TargetType"
+                                data-subhabits="@JsonSerializer.Serialize(subHabits.Select(h => new { id = h.Id, name = h.Name }))"
+                                onclick="openEditModal(this)">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                        </button>
+
+                        @if (habit.CompletionMethod != HabitCompletionMethod.SubHabits)
+                        {
+                            <button type="button" class="icon-btn" title="Add entry"
+                                    onclick="openAddEntryModal('@habit.Id', '@habit.IsCompletable.ToString().ToLowerInvariant()', '@habit.CompletionMethod', '@habit.Unit', '@habit.UnitPlural')">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="5" x2="12" y2="19" />
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                            </button>
+                        }
+
+                        <form method="post" action="/Habits/@habit.Id/Delete" onsubmit="return confirm('Delete &quot;@habit.Name&quot;? This cannot be undone.');">
+                            <AntiforgeryToken />
+                            <button type="submit" class="icon-btn icon-btn-danger" title="Delete">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                    <path d="M10 11v6" />
+                                    <path d="M14 11v6" />
+                                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                                </svg>
+                            </button>
+                        </form>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+}
+else
+{
+    <p><a href="Account/Login">Log in</a> to start tracking habits.</p>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private bool isAuthenticated;
+    private Guid userId;
+    private IReadOnlyList<HabitDto>? habits;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateTask;
+        var userIdClaim = authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        isAuthenticated = userIdClaim is not null && Guid.TryParse(userIdClaim, out userId);
+        if (isAuthenticated)
+        {
+            habits = await HabitQueries.GetHabitsForUserAsync(userId);
+        }
+    }
+
+    private IReadOnlyList<HabitDto> GetSubHabits(Guid parentHabitId)
+        => habits?.Where(h => h.ParentHabitId == parentHabitId).ToList() ?? [];
+}

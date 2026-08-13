@@ -1,0 +1,205 @@
+@using System.ComponentModel.DataAnnotations
+@using Habit_Tracker.Application.Commands
+@using Habit_Tracker.Domain.Enums
+
+@inject IHabitCommands HabitCommands
+@inject NavigationManager NavigationManager
+
+<button type="button" class="add-btn" onclick="document.getElementById('add-habit-modal').showModal()">+ Add Habit</button>
+
+<dialog id="add-habit-modal">
+    <h3>Add habit</h3>
+
+    <EditForm Model="Input" method="post" OnValidSubmit="CreateHabit" OnInvalidSubmit="() => reopenModal = true" FormName="create-habit">
+        <DataAnnotationsValidator />
+        <ValidationSummary class="text-danger" role="alert" />
+
+        @if (errorMessage is not null)
+        {
+            <div class="alert alert-danger" role="alert">@errorMessage</div>
+        }
+
+        <div class="form-floating mb-3">
+            <InputText @bind-Value="Input.Name" class="form-control" placeholder="Habit name" />
+            <label>Name</label>
+            <ValidationMessage For="() => Input.Name" class="text-danger" />
+        </div>
+
+        <div class="checkbox mb-3" onchange="toggleCompletionFields()">
+            <label class="form-label">
+                <InputCheckbox @bind-Value="Input.IsCompletable" id="habit-completable" />
+                Completable
+            </label>
+        </div>
+
+        <div id="completion-settings" class="mb-3" style="display: @(Input.IsCompletable ? "block" : "none")">
+            <label class="form-label d-block">Completed by</label>
+            <div onchange="toggleTotalFields()">
+                <InputRadioGroup @bind-Value="Input.CompletionMethod">
+                    <label class="form-check-label me-3">
+                        <InputRadio Value="HabitCompletionMethod.SubHabits" id="completion-method-subhabits" />
+                        Sub-habits
+                    </label>
+                    <label class="form-check-label">
+                        <InputRadio Value="HabitCompletionMethod.Total" id="completion-method-total" />
+                        A specified total
+                    </label>
+                </InputRadioGroup>
+            </div>
+
+            <div id="total-settings" class="row g-2 mt-2" style="display: @(Input.CompletionMethod == HabitCompletionMethod.Total ? "flex" : "none")">
+                <div class="col-4">
+                    <label class="form-label">Target amount</label>
+                    <InputNumber @bind-Value="Input.TargetValue" class="form-control" />
+                    <ValidationMessage For="() => Input.TargetValue" class="text-danger" />
+                </div>
+                <div class="col-4">
+                    <label class="form-label">Unit (singular)</label>
+                    <InputText @bind-Value="Input.Unit" class="form-control" placeholder="ex. page" />
+                    <ValidationMessage For="() => Input.Unit" class="text-danger" />
+                </div>
+                <div class="col-4">
+                    <label class="form-label">Unit (plural)</label>
+                    <InputText @bind-Value="Input.UnitPlural" class="form-control" placeholder="ex. pages" />
+                    <ValidationMessage For="() => Input.UnitPlural" class="text-danger" />
+                </div>
+                <div class="col-12 mt-2">
+                    <label class="form-label d-block">Target type</label>
+                    <InputRadioGroup @bind-Value="Input.TargetType">
+                        <label class="form-check-label me-3">
+                            <InputRadio Value="HabitTargetType.OnceOff" />
+                            Once-off total (accumulates across all entries)
+                        </label>
+                        <label class="form-check-label">
+                            <InputRadio Value="HabitTargetType.PerEntry" />
+                            Per entry (each entry aims for this amount)
+                        </label>
+                    </InputRadioGroup>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Parent habit</label>
+            <InputSelect @bind-Value="Input.ParentHabitId" class="form-select">
+                <option value="">None (top-level habit)</option>
+                @if (Habits is not null)
+                {
+                    @foreach (var habit in Habits)
+                    {
+                        <option value="@habit.Id">@habit.Name</option>
+                    }
+                }
+            </InputSelect>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Create</button>
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-habit-modal').close()">Cancel</button>
+    </EditForm>
+</dialog>
+
+@if (reopenModal)
+{
+    <script>
+        document.getElementById('add-habit-modal').showModal();
+    </script>
+}
+
+<script>
+    function toggleCompletionFields() {
+        var completable = document.getElementById('habit-completable').checked;
+        document.getElementById('completion-settings').style.display = completable ? 'block' : 'none';
+    }
+    function toggleTotalFields() {
+        var isTotal = document.getElementById('completion-method-total').checked;
+        document.getElementById('total-settings').style.display = isTotal ? 'flex' : 'none';
+    }
+</script>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<HabitDto>? Habits { get; set; }
+
+    [Parameter, EditorRequired]
+    public Guid UserId { get; set; }
+
+    [SupplyParameterFromForm(FormName = "create-habit")]
+    private CreateHabitInputModel Input { get; set; } = new();
+
+    private string? errorMessage;
+    private bool reopenModal;
+
+    private async Task CreateHabit()
+    {
+        var parentHabitId = Guid.TryParse(Input.ParentHabitId, out var parsed) ? parsed : (Guid?)null;
+        var completionMethod = Input.IsCompletable ? Input.CompletionMethod : (HabitCompletionMethod?)null;
+        var isTotal = completionMethod == HabitCompletionMethod.Total;
+
+        try
+        {
+            await HabitCommands.CreateHabitAsync(new CreateHabitRequest
+            {
+                UserId = UserId,
+                Name = Input.Name,
+                IsCompletable = Input.IsCompletable,
+                CompletionMethod = completionMethod,
+                TargetValue = isTotal ? Input.TargetValue : null,
+                Unit = isTotal ? Input.Unit : null,
+                UnitPlural = isTotal ? Input.UnitPlural : null,
+                TargetType = isTotal ? Input.TargetType : null,
+                ParentHabitId = parentHabitId,
+            });
+
+            NavigationManager.NavigateTo("/", forceLoad: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+            reopenModal = true;
+        }
+    }
+
+    private sealed class CreateHabitInputModel : IValidatableObject
+    {
+        [Required]
+        [StringLength(200)]
+        public string Name { get; set; } = "";
+
+        public bool IsCompletable { get; set; }
+
+        public HabitCompletionMethod CompletionMethod { get; set; } = HabitCompletionMethod.SubHabits;
+
+        public int? TargetValue { get; set; }
+
+        [StringLength(50)]
+        public string? Unit { get; set; }
+
+        [StringLength(50)]
+        public string? UnitPlural { get; set; }
+
+        public HabitTargetType TargetType { get; set; } = HabitTargetType.OnceOff;
+
+        public string? ParentHabitId { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (IsCompletable && CompletionMethod == HabitCompletionMethod.Total)
+            {
+                if (TargetValue is null or <= 0)
+                {
+                    yield return new ValidationResult("Enter a target amount greater than zero.", [nameof(TargetValue)]);
+                }
+
+                if (string.IsNullOrWhiteSpace(Unit))
+                {
+                    yield return new ValidationResult("Enter a unit (e.g. \"page\").", [nameof(Unit)]);
+                }
+
+                if (string.IsNullOrWhiteSpace(UnitPlural))
+                {
+                    yield return new ValidationResult("Enter a plural unit (e.g. \"pages\").", [nameof(UnitPlural)]);
+                }
+            }
+        }
+    }
+}
