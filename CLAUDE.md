@@ -628,6 +628,70 @@ reintroduce the same bug:
    (`/Habits/{id}/Delete`, `/Habits/{id}/Entries`) instead, each row differing only by `{habitId}` in
    the URL.
 
+## Azure deployment
+
+Deployed to Azure App Service + Azure Database for PostgreSQL Flexible Server, both provisioned
+directly (not via the Portal's bundled "Web App + Database" flow — that flow rejects Free/Trial
+subscriptions with "Selected subscription type is not supported"). Resources: resource group
+`rg-habit-tracker` (South Africa North), Postgres Flexible Server `habittracker-pg` (Burstable
+B1ms, PG 17, database `habittracker`), App Service Plan `asp-habit-tracker` (Linux, F1 Free — this
+app never uses `InteractiveServer`/SignalR circuits, so the Free tier's lack of WebSocket-friendly
+always-on hosting is fine), Web App `habit-tracker-cf` (.NET 10 on Linux).
+
+Deploys via GitHub Actions on every push to `main` (`.github/workflows/main_habit-tracker-cf.yml`).
+Each of these was a real, non-obvious failure hit while setting this up — reproduce them exactly:
+
+1. **Connection string must be type `Custom`, not `PostgreSQL`.** Azure exposes a `PostgreSQL`-typed
+   App Service connection string as an env var prefixed `POSTGRESQLCONNSTR_*`, but .NET's
+   `EnvironmentVariablesConfigurationProvider` only special-cases `CUSTOMCONNSTR_`/`SQLCONNSTR_`/
+   `SQLAZURECONNSTR_`/`MYSQLCONNSTR_` back into `ConnectionStrings:<name>` — `POSTGRESQLCONNSTR_` isn't
+   in that list, so `builder.Configuration.GetConnectionString("DefaultConnection")` silently returns
+   null. Set it with `az webapp config connection-string set --connection-string-type Custom`.
+2. **`ForwardedHeadersMiddleware` is required**, registered as the very first thing after
+   `builder.Build()` in `Program.cs`, with `KnownNetworks`/`KnownProxies` explicitly `.Clear()`'d (the
+   default only trusts loopback, and Azure's front-end isn't loopback) — otherwise
+   `UseHttpsRedirection`/Identity's secure cookies can't tell the original request was HTTPS.
+3. **The Linux container's entry-point auto-detection needs an explicit startup command.** The
+   host's publish output legitimately contains *two* `.runtimeconfig.json` files —
+   `Habit_Tracker.runtimeconfig.json` (the host) and `Habit_Tracker.Client.runtimeconfig.json` (the
+   WASM client's own runtimeconfig, copied in as part of the Blazor Web App static-asset bundling) —
+   and Oryx's auto-detect requires exactly one, silently falling back to Azure's built-in placeholder
+   site (no error, `state: Running`, HTTP 200) if it finds two. Set an explicit startup command:
+   `az webapp config set --startup-file "dotnet Habit_Tracker.dll"`.
+4. **CI must publish only the host project, not the whole solution.** `dotnet publish` with no
+   project argument at the solution level also publishes `Habit_Tracker.Tests` (pulling in bUnit,
+   coverlet, Testcontainers, xunit, etc.) into the same output folder, which compounds gotcha #3 with
+   even more ambiguous entry points. The workflow publishes
+   `Habit_Tracker/Habit_Tracker/Habit_Tracker.csproj` explicitly.
+5. **Zip deploy does not clean the target directory first** (`CleanOutputPath: False` in the Kudu
+   deployment log) — files from a bad deploy (e.g. gotcha #4 before it was fixed) persist in
+   `/home/site/wwwroot` and keep confusing entry-point detection even after a later, correct deploy.
+   Recovery requires clearing it out by hand (Kudu `/api/command`, `bash -c "rm -rf
+   /home/site/wwwroot/*"` — note the command endpoint does *not* go through a shell by default, so
+   glob expansion and `&&` chaining silently don't work unless you invoke `bash -c "..."` explicitly).
+6. **GitHub Actions deploys via OIDC federated login, not a publish profile.** A publish-profile
+   secret was the first approach tried, but Azure CLI's output redaction masks the password in
+   *every* form of output (`-o json`, `-o xml`, even raw `az rest` passthrough) — there is no flag to
+   get the real value back out, so a freshly-fetched publish profile is unusable. Instead: an Azure AD
+   app registration + service principal with `Contributor` scoped to the resource group, a federated
+   credential trusting `token.actions.githubusercontent.com`, and `azure/login@v2` +
+   `azure/webapps-deploy@v3` (no secret stored). **The federated credential's `subject` must include
+   GitHub's immutable owner/repo IDs**, not just the names —
+   `repo:CorneliusFrylinck@40593090/Habit_Tracker@1333524639:ref:refs/heads/main`, not
+   `repo:CorneliusFrylinck/Habit_Tracker:ref:refs/heads/main` — otherwise login fails with
+   `AADSTS700213: No matching federated identity record found`.
+7. **SCM basic-auth publishing credentials are disabled by default** on a fresh subscription (used
+   only transiently here to debug via Kudu's VFS/command API) — leave it disabled
+   (`basicPublishingCredentialsPolicies/scm` → `properties.allow=false`) unless actively debugging.
+8. **Fresh subscriptions need their resource providers registered before first use** —
+   `Microsoft.DBforPostgreSQL` and `Microsoft.Web` both needed `az provider register --namespace
+   <name>` the first time, otherwise creation fails with `MissingSubscriptionRegistration`.
+9. **Git Bash (MSYS2) mangles any CLI argument starting with `/subscriptions/...`** — it auto-converts
+   the leading `/` as if it were a Windows path, corrupting `--scope` on `az role assignment create`
+   into a bogus value and producing an unrelated-looking `(MissingSubscription) The request did not
+   have a subscription or a valid tenant level resource provider.` error. Run that specific command
+   from PowerShell instead (or prefix the value to defeat MSYS2's path conversion).
+
 ## Commands
 
 Run all commands from the repository root (`C:\Dev\BlazorApp`), operating on `Habit_Tracker.slnx`.
