@@ -9,6 +9,10 @@ on:
     - main
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -27,10 +31,16 @@ jobs:
     - name: dotnet publish
       run: dotnet publish -c Release -o ${{env.DOTNET_ROOT}}/myapp 
 
+    - name: Login to Azure
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
     - name: Deploy to Azure Web App
-      uses: azure/webapps-deploy@v2
-      with: 
+      uses: azure/webapps-deploy@v3
+      with:
         app-name: 'habit-tracker-cf'
         slot-name: 'production'
-        publish-profile: ${{ secrets.AzureAppService_PublishProfile_f986b624bf6e4301b6de878c27c23f29 }}
-        package: ${{env.DOTNET_ROOT}}/myapp 
+        package: ${{env.DOTNET_ROOT}}/myapp
