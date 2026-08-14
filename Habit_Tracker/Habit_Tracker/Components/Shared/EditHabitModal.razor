@@ -5,7 +5,7 @@
 @inject IHabitCommands HabitCommands
 @inject NavigationManager NavigationManager
 
-<dialog class="modal" id="edit-habit-modal">
+<dialog class="app-modal" id="edit-habit-modal">
     <h3>Edit habit</h3>
 
     <EditForm Model="EditInput" method="post" OnValidSubmit="UpdateHabit" OnInvalidSubmit="() => reopenEditModal = true" FormName="edit-habit">

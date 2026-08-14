@@ -7,7 +7,7 @@
 
 <button type="button" class="add-btn" onclick="document.getElementById('add-habit-modal').showModal()">+ Add Habit</button>
 
-<dialog class="modal" id="add-habit-modal">
+<dialog class="app-modal" id="add-habit-modal">
     <h3>Add habit</h3>
 
     <EditForm Model="Input" method="post" OnValidSubmit="CreateHabit" OnInvalidSubmit="() => reopenModal = true" FormName="create-habit">

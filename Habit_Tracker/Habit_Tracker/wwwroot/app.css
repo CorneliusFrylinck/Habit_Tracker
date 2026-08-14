@@ -207,7 +207,7 @@ h1:focus {
     width: 50%;
 }
 
-.modal {
+.app-modal {
     border-radius: 1rem;
     border: 1px solid rgba(150, 150, 150, 0.3);
 }
