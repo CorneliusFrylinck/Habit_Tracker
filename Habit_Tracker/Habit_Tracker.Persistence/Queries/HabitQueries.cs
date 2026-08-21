@@ -28,7 +28,12 @@ public class HabitQueries(NpgsqlDataSource dataSource) : IHabitQueries
                     ELSE ROUND(100.0 * COUNT(*) FILTER (WHERE e."IsCompleted") / NULLIF(COUNT(e."Id"), 0))::int
                 END,
                 0
-            ) AS "CompletionPercentage"
+            ) AS "CompletionPercentage",
+            CASE
+                WHEN NOT h."IsCompletable" OR COUNT(e."Id") = 0 THEN NULL
+                WHEN COUNT(*) FILTER (WHERE e."Amount" IS NOT NULL) > 0 THEN SUM(e."Amount")
+                ELSE COUNT(e."Id")
+            END::int AS "TotalCompleted"
         FROM "Habits" h
         LEFT JOIN "HabitEntries" e ON e."HabitId" = h."Id"
         WHERE h."UserId" = @UserId
@@ -94,6 +99,7 @@ public class HabitQueries(NpgsqlDataSource dataSource) : IHabitQueries
             UnitPlural = dto.UnitPlural,
             TargetType = dto.TargetType,
             CompletionPercentage = dto.CompletionPercentage,
+            TotalCompleted = dto.TotalCompleted,
         };
 
         foreach (var child in childrenByParent[dto.Id])

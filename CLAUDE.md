@@ -162,13 +162,15 @@ DTOs (`Habit_Tracker.Application.DTOs`) mirror the domain fields plus a computed
 `CompletionPercentage`:
 
 - **`HabitDto`** — flat habit projection used for the top-level list; adds `CompletionPercentage`
-  (`int`, 0–100).
+  (`int`, 0–100) and `TotalCompleted` (`int?`, null unless the habit is completable **and** has at
+  least one entry — see the `HabitsSql` `TotalCompleted` column below).
 - **`CreateHabitRequest`** — `UserId`, `Name` (required), `IsCompletable`, `CompletionMethod`,
   `TargetValue`, `Unit`, `UnitPlural`, `TargetType`, `ParentHabitId`.
 - **`UpdateHabitRequest`** — same as create plus `HabitId`, `UserId`, and `RemovedSubHabitIds`
   (`List<Guid>`, defaults to empty) — sub-habits to detach (not delete) from this habit on save.
 - **`HabitTreeNodeDto`** — recursive: a habit plus its full descendant tree. **Leaf** nodes (no
-  sub-habits) carry `Entries`; **non-leaf** nodes carry `SubHabits` instead — never both.
+  sub-habits) carry `Entries`; **non-leaf** nodes carry `SubHabits` instead — never both. Also
+  carries `TotalCompleted` (`int?`), same meaning as on `HabitDto`.
 - **`HabitEntryDto`** — `Id`, `HabitId`, `TrackedAt`, `IsCompleted`, `Amount`.
 
 Interfaces (implemented by `Persistence`):
@@ -272,7 +274,12 @@ SELECT
             ELSE ROUND(100.0 * COUNT(*) FILTER (WHERE e."IsCompleted") / NULLIF(COUNT(e."Id"), 0))::int
         END,
         0
-    ) AS "CompletionPercentage"
+    ) AS "CompletionPercentage",
+    CASE
+        WHEN NOT h."IsCompletable" OR COUNT(e."Id") = 0 THEN NULL
+        WHEN COUNT(*) FILTER (WHERE e."Amount" IS NOT NULL) > 0 THEN SUM(e."Amount")
+        ELSE COUNT(e."Id")
+    END::int AS "TotalCompleted"
 FROM "Habits" h
 LEFT JOIN "HabitEntries" e ON e."HabitId" = h."Id"
 WHERE h."UserId" = @UserId
@@ -280,10 +287,17 @@ GROUP BY h."Id", h."Name", h."IsCompletable", h."CompletionMethod", h."TargetVal
 ORDER BY h."CreatedAt"
 ```
 
-Three branches, in order: per-entry-average-capped-at-100 (Total + PerEntry), sum-capped-at-100 (Total
-+ OnceOff), and checkbox-completion-ratio (everything else, including non-completable habits, which
-naturally yields `0/0 → NULL → COALESCE → 0`). **The `FILTER (WHERE e."Amount" IS NOT NULL)` on the
-per-entry branch is required, not cosmetic** — see "Gotchas" below for why.
+Three `CompletionPercentage` branches, in order: per-entry-average-capped-at-100 (Total + PerEntry),
+sum-capped-at-100 (Total + OnceOff), and checkbox-completion-ratio (everything else, including
+non-completable habits, which naturally yields `0/0 → NULL → COALESCE → 0`). **The `FILTER (WHERE
+e."Amount" IS NOT NULL)` on the per-entry branch is required, not cosmetic** — see "Gotchas" below for
+why.
+
+`TotalCompleted` is `NULL` for non-completable habits and for completable habits with zero entries;
+otherwise it's the sum of entry `Amount`s if any entry has one (`SUM` already ignores `NULL`s on its
+own — the `FILTER` there is just for the `> 0` existence check, not for the sum itself), else a plain
+count of entries (the fallback for `SubHabits`-method habits, whose entries never carry an `Amount`).
+Displayed below the progress ring on `Home.razor`'s list and `HabitNodeView`'s accordion rows.
 
 `GetHabitTreeAsync(habitId, userId)`:
 1. Calls `GetHabitsForUserAsync` (reuses the same flat query/ownership check) and looks up `habitId` in
@@ -377,6 +391,15 @@ pages, no email sender. `ApplicationUser` adds no properties beyond `IdentityUse
 regenerating this from a fresh Identity-scaffolded template, delete everything else under
 `Components/Account/` and don't wire up the pages this app doesn't use.
 
+**Persistent "remember me" logins**: `Program.cs` calls `ConfigureApplicationCookie` (after
+`AddIdentityCore`) to set `ExpireTimeSpan = TimeSpan.FromDays(7)` and `SlidingExpiration = true` on
+the Identity application cookie. Combined with Login.razor's existing `RememberMe` checkbox
+(`PasswordSignInAsync(..., isPersistent: RememberMe, ...)`), checking "Remember me" issues a cookie
+valid 7 days that renews itself on any authenticated request made after it's more than half expired —
+so a return visit inside the window resets the clock instead of forcing another login. Leaving it
+unchecked still issues a session-only cookie (cleared when the browser closes), unaffected by this
+config. No credentials are stored client-side; the cookie is the only persisted artifact.
+
 ### Server ↔ WASM auth-state handoff
 
 Because auth state must flow from the server to interactive WASM components with no way for the
@@ -424,9 +447,13 @@ All habit-tracking UI lives under `Habit_Tracker/Habit_Tracker/Components/`.
 **`Pages/Home.razor`** (`/`) — if not authenticated, shows a login link. Otherwise renders
 `<AddHabitModal>`, `<EditHabitModal>`, `<AddEntryModal>` (see below), then the **top-level habits
 only** (`habits.Where(h => h.ParentHabitId is null)`) as a `ul.habit-list`. Each `li.habit-list-item`
-shows: a `<HabitProgressRing>` only if `habit.IsCompletable`; the habit name; a meta line — for
-`Total` habits, `"{TargetValue} {unit-or-plural} {per entry|total}"` (unit pluralized off
-`TargetValue == 1`), for `SubHabits` habits, `"via sub-habits"`; then `.habit-actions` icon buttons:
+shows: if `habit.IsCompletable`, a `div.habit-progress` (flex column) containing a
+`<HabitProgressRing>` and, only if `habit.TotalCompleted is not null`, a `span.habit-total` below it —
+the raw number alone for `SubHabits`-method habits (no `Unit` to show), or the number plus
+`Unit`/`UnitPlural` (pluralized off `TotalCompleted == 1`) for `Total`-method habits; the habit name; a
+meta line — for `Total` habits, `"{TargetValue} {unit-or-plural} {per entry|total}"` (unit pluralized
+off `TargetValue == 1`), for `SubHabits` habits, `"via sub-habits"`; then `.habit-actions` icon
+buttons:
 a View link (`/habits/{id}`), an Edit button (opens `EditHabitModal` via `openEditModal(this)`,
 passing every editable field plus a JSON-serialized sub-habit id/name list through `data-*`
 attributes), an Add-entry button (**shown whenever `CompletionMethod != SubHabits`** — i.e. for
@@ -436,17 +463,23 @@ completed by completing their sub-habits, not by tracking the parent directly), 
 `<AntiforgeryToken>`).
 
 **`Pages/HabitDetails.razor`** (`/habits/{HabitId:guid}`) — loads the full tree via
-`IHabitQueries.GetHabitTreeAsync`; shows "not found" if null. Renders a `<HabitProgressRing>` in the
-`<h1>` only if `habit.IsCompletable`. Then: if `habit.CompletionMethod != Total`, wraps
-`<HabitNodeView Node="habit" />` in `<ul class="habit-node-list"><li><div
+`IHabitQueries.GetHabitTreeAsync`, plus the flat per-user list via `GetHabitsForUserAsync` (needed only
+for the `<AddHabitModal>` parent dropdown below); shows "not found" if null. Renders a
+`<HabitProgressRing>` in the `<h1>` only if `habit.IsCompletable`. If `habit.SubHabits.Count > 0`,
+also renders `<AddHabitModal Habits="habits" UserId="userId" DefaultParentHabitId="habit.Id" />` —
+the same "+ Add Habit" button/modal as `Home.razor`, but scoped to appear only when this habit
+already has sub-habits, with its parent dropdown pre-selected to the habit being viewed (see
+`AddHabitModal`'s `DefaultParentHabitId` parameter below). Then: if `habit.CompletionMethod != Total`,
+wraps `<HabitNodeView Node="habit" />` in `<ul class="habit-node-list"><li><div
 class="habit-node-detail">...</div></li></ul>`; if it **is** `Total`, renders `<HabitNodeView
 Node="habit" />` directly with no wrapper. Always renders a trailing `<AddEntryModal>`.
 
 **`Shared/HabitNodeView.razor`** — the recursive tree renderer, given a `HabitTreeNodeDto Node`:
 - If `Node.SubHabits.Count > 0`: renders a `ul.habit-node-list` of `<details><summary>...</summary>
   <div class="habit-node-detail"><HabitNodeView Node="child" /></div></details>` per child — a native
-  `<details>`/`<summary>` accordion, recursing into itself for arbitrary depth. Each `<summary>` shows
-  a progress ring (if `child.IsCompletable`), the name, and in `.habit-node-action`: a View link
+  `<details>`/`<summary>` accordion, recursing into itself for arbitrary depth. Each `<summary>` shows,
+  if `child.IsCompletable`, the same `div.habit-progress` (ring + `TotalCompleted` below it) as
+  `Home.razor`'s list items; then the name, and in `.habit-node-action`: a View link
   (`/habits/{child.Id}`) if `child.SubHabits.Count > 0`, otherwise an Add-entry button
   (`onclick="event.preventDefault(); openAddEntryModal(...)"` — `preventDefault` is required so
   clicking the button doesn't also toggle the parent `<details>`).
@@ -460,19 +493,23 @@ Node="habit" />` directly with no wrapper. Always renders a trailing `<AddEntryM
 `-90deg` so the fill starts at 12 o'clock, with the percentage as centered SVG text. **All numeric SVG
 attributes are formatted with `CultureInfo.InvariantCulture`** — see gotchas.
 
-**`Shared/AddHabitModal.razor`** — a native `<dialog id="add-habit-modal">` opened by a `.add-btn`
-("+ Add Habit") button via `showModal()`. An `EditForm` (`FormName="create-habit"`,
+**`Shared/AddHabitModal.razor`** — a native `<dialog class="app-modal" id="add-habit-modal">` opened by
+a `.add-btn` ("+ Add Habit") button via `showModal()`. An `EditForm` (`FormName="create-habit"`,
 `[SupplyParameterFromForm(FormName = "create-habit")]`) with: name; an `IsCompletable` checkbox
 (`onchange="toggleCompletionFields()"`) that shows/hides `#completion-settings`; inside that, a
 `CompletionMethod` radio group (`onchange="toggleTotalFields()"`) that shows/hides `#total-settings`;
-inside that, target amount/unit/unit-plural inputs and a `TargetType` radio group; and a parent-habit
-`<select>` populated from the `Habits` parameter. `IValidatableObject` on the input model duplicates
-the `Total`-branch validation (target > 0, unit/unit-plural non-blank) client-side for immediate
-feedback; the server-side `ValidateCompletionSettings` in `HabitCommands` is still the authoritative
-check. On success, `NavigationManager.NavigateTo("/", forceLoad: true)`; on
-`InvalidOperationException`, shows the message and re-opens the modal via a `reopenModal` flag + an
-injected `<script>` calling `showModal()` again (since the page did a full static-SSR round trip, the
-dialog's open state doesn't survive without this).
+inside that, target amount/unit/unit-plural inputs (`#total-settings .col-4`, stacked vertically in
+portrait — see Styling) and a `TargetType` radio group; and a parent-habit `<select>` populated from
+the `Habits` parameter, defaulted via the optional `[Parameter] Guid? DefaultParentHabitId` — set in
+`OnInitialized` only when `Input.ParentHabitId` is still empty, so it seeds the dropdown on first
+render (from `HabitDetails.razor`) without ever overwriting a value the user already picked on a
+validation-failure round trip. `IValidatableObject` on the input model duplicates the `Total`-branch
+validation (target > 0, unit/unit-plural non-blank) client-side for immediate feedback; the
+server-side `ValidateCompletionSettings` in `HabitCommands` is still the authoritative check. On
+success, `NavigationManager.NavigateTo("/", forceLoad: true)`; on `InvalidOperationException`, shows
+the message and re-opens the modal via a `reopenModal` flag + an injected `<script>` calling
+`showModal()` again (since the page did a full static-SSR round trip, the dialog's open state doesn't
+survive without this).
 
 **`Shared/EditHabitModal.razor`** — same shape as Add, `FormName="edit-habit"`, plus hidden inputs
 `#edit-habit-id` and `#edit-removed-subhabits` (a CSV of ids, rebuilt by `updateRemovedSubHabits()`
@@ -535,14 +572,31 @@ habit-tracking-specific rules appended at the bottom:
 .progress-ring__fill { fill: none; stroke: #1b6ec2; stroke-width: 4; stroke-linecap: round; transition: stroke-dashoffset 0.3s ease; }
 .progress-ring__label { font-size: 0.65rem; fill: #333; }
 
+.habit-progress { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.habit-total { font-size: 0.7rem; color: #666; white-space: nowrap; }
+
 .add-btn { float: right; background-color: dodgerblue; color: whitesmoke; border-radius: 1rem; border: 1px solid gray; }
-#add-habit-modal { width: 50%; border-radius: 1rem; border: 1px solid rgba(150, 150, 150, 0.3); }
-#edit-habit-modal { border-radius: 1rem; border: 1px solid rgba(150, 150, 150, 0.3); }
+#add-habit-modal { width: 50%; }
+.app-modal { border-radius: 1rem; border: 1px solid rgba(150, 150, 150, 0.3); }
+
+@media (orientation: portrait) {
+    #add-habit-modal { width: 80%; }
+    #total-settings .col-4 { flex: 0 0 100%; max-width: 100%; }
+}
 ```
 
 The accordion chevron is a **CSS-only thin outline chevron** (two rotated border edges), not a Unicode
 glyph or an image: closed = `rotate(45deg)`, open = `rotate(-135deg)`, driven purely by the `[open]`
 attribute `<details>` toggles natively — no JS needed for the open/close animation itself.
+
+`.habit-progress` stacks a habit's `HabitProgressRing` and (if present) its `.habit-total` text
+vertically, centered — used by both `Home.razor`'s list items and `HabitNodeView`'s accordion
+`<summary>` rows. The portrait media query only restacks `AddHabitModal`'s `#total-settings` row
+(target amount / unit / unit-plural) and widens `#add-habit-modal` itself to 80% — `EditHabitModal`'s
+equivalent `#edit-total-settings`/`#edit-habit-modal` were intentionally left untouched (not part of
+that change) and still use the 50%-width, side-by-side layout at all viewport sizes. `@media
+(orientation: portrait)` matches whenever viewport height ≥ width, i.e. exactly "phone held upright" —
+CSS's direct expression of "page width lower than page height."
 
 ## Testing (`Habit_Tracker.Tests`)
 
@@ -569,7 +623,10 @@ xUnit, with two distinct strategies:
     ratio, once-off sum capped at 100, per-entry average capped at 100), **and** a regression test for
     the Postgres `LEAST()`-ignores-NULL bug (a legacy no-amount entry must not be counted in the
     per-entry average), plus `GetHabitTreeAsync` null cases and multi-level tree building with entries
-    attached only at leaves.
+    attached only at leaves. Also covers every `TotalCompleted` branch: null for non-completable and
+    for zero entries, entry-count fallback for `SubHabits`-method habits (no `Amount` on any entry),
+    sum-of-amounts for `Total`-method habits, and the mixed case (a legacy no-amount entry alongside
+    valued ones) summing only the entries that have a value.
 - **Component tests** (`Components/HabitProgressRingTests.cs`, `Components/HabitNodeViewTests.cs`) use
   bUnit. `HabitProgressRingTests` covers percent clamping and — critically — an
   `InvariantCulture` regression test that sets `CultureInfo.CurrentCulture` to `de-DE` and asserts no

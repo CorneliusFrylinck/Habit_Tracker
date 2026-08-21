@@ -123,11 +123,24 @@
     [Parameter, EditorRequired]
     public Guid UserId { get; set; }
 
+    // Pre-selects the parent-habit dropdown - used when adding a sub-habit directly from its
+    // future parent's details page, instead of always defaulting to "None (top-level habit)".
+    [Parameter]
+    public Guid? DefaultParentHabitId { get; set; }
+
     [SupplyParameterFromForm(FormName = "create-habit")]
     private CreateHabitInputModel Input { get; set; } = new();
 
     private string? errorMessage;
     private bool reopenModal;
+
+    protected override void OnInitialized()
+    {
+        if (DefaultParentHabitId is { } defaultParentHabitId && string.IsNullOrEmpty(Input.ParentHabitId))
+        {
+            Input.ParentHabitId = defaultParentHabitId.ToString();
+        }
+    }
 
     private async Task CreateHabit()
     {

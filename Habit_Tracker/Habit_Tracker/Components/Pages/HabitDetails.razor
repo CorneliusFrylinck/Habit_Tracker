@@ -25,6 +25,11 @@ else
         @habit.Name
     </h1>
 
+    @if (habit.SubHabits.Count > 0)
+    {
+        <AddHabitModal Habits="habits" UserId="userId" DefaultParentHabitId="habit.Id" />
+    }
+
     @if (habit.CompletionMethod != Domain.Enums.HabitCompletionMethod.Total)
     {
         <ul class="habit-node-list">
@@ -52,6 +57,7 @@ else
     private bool isAuthenticated;
     private Guid userId;
     private HabitTreeNodeDto? habit;
+    private IReadOnlyList<HabitDto>? habits;
 
     protected override async Task OnInitializedAsync()
     {
@@ -62,6 +68,7 @@ else
         if (isAuthenticated)
         {
             habit = await HabitQueries.GetHabitTreeAsync(HabitId, userId);
+            habits = await HabitQueries.GetHabitsForUserAsync(userId);
         }
     }
 }

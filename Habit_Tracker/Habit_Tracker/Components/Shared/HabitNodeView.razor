@@ -13,7 +13,15 @@
                     <summary>
                         @if (child.IsCompletable)
                         {
-                            <HabitProgressRing PercentComplete="child.CompletionPercentage" />
+                            <div class="habit-progress">
+                                <HabitProgressRing PercentComplete="child.CompletionPercentage" />
+                                @if (child.TotalCompleted is not null)
+                                {
+                                    <span class="habit-total">
+                                        @child.TotalCompleted @(child.Unit is not null ? (child.TotalCompleted == 1 ? child.Unit : child.UnitPlural) : null)
+                                    </span>
+                                }
+                            </div>
                         }
                         <span class="habit-name">@child.Name</span>
                         <span class="habit-node-action">

@@ -29,7 +29,15 @@
                 <li class="habit-list-item">
                     @if (habit.IsCompletable)
                     {
-                        <HabitProgressRing PercentComplete="habit.CompletionPercentage" />
+                        <div class="habit-progress">
+                            <HabitProgressRing PercentComplete="habit.CompletionPercentage" />
+                            @if (habit.TotalCompleted is not null)
+                            {
+                                <span class="habit-total">
+                                    @habit.TotalCompleted @(habit.Unit is not null ? (habit.TotalCompleted == 1 ? habit.Unit : habit.UnitPlural) : null)
+                                </span>
+                            }
+                        </div>
                     }
                     <span class="habit-name">@habit.Name</span>
                     @if (habit.CompletionMethod == HabitCompletionMethod.Total)

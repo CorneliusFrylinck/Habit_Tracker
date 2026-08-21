@@ -17,4 +17,8 @@ public class HabitDto
 
     // Percentage (0-100) of this habit's tracked entries marked completed; 0 if it has none yet.
     public int CompletionPercentage { get; set; }
+
+    // Only set for completable habits with at least one entry: the sum of entry Amounts if any
+    // entry has one, else a plain count of entries. Null otherwise.
+    public int? TotalCompleted { get; set; }
 }

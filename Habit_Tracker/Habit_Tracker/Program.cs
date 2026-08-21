@@ -47,6 +47,15 @@ builder.Services.AddIdentityCore<ApplicationUser>(options => options.SignIn.Requ
     .AddSignInManager()
     .AddDefaultTokenProviders();
 
+// "Remember me" logins (see Login.razor) get a persistent cookie valid up to 7 days; sliding
+// expiration renews it on activity, so a return visit inside that window resets the clock
+// instead of forcing another login.
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.ExpireTimeSpan = TimeSpan.FromDays(7);
+    options.SlidingExpiration = true;
+});
+
 var app = builder.Build();
 
 // Azure App Service (and most PaaS hosts) terminate TLS at their own front-end and forward

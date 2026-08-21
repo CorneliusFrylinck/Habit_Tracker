@@ -173,6 +173,140 @@ public class HabitQueriesTests(PostgresContainerFixture fixture)
     }
 
     [Fact]
+    public async Task GetHabitsForUserAsync_NonCompletable_TotalCompletedIsNull()
+    {
+        await using var db = fixture.CreateDbContext();
+        var dataSource = fixture.CreateDataSource();
+        var userId = await TestDataHelper.CreateTestUserAsync(db);
+        var commands = new HabitCommands(db);
+        var queries = new HabitQueries(dataSource);
+
+        var habit = await commands.CreateHabitAsync(new CreateHabitRequest { UserId = userId, Name = "Drink water", IsCompletable = false });
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: false, amount: 500);
+
+        var habits = await queries.GetHabitsForUserAsync(userId);
+
+        Assert.Null(Assert.Single(habits).TotalCompleted);
+    }
+
+    [Fact]
+    public async Task GetHabitsForUserAsync_CompletableWithNoEntries_TotalCompletedIsNull()
+    {
+        await using var db = fixture.CreateDbContext();
+        var dataSource = fixture.CreateDataSource();
+        var userId = await TestDataHelper.CreateTestUserAsync(db);
+        var commands = new HabitCommands(db);
+        var queries = new HabitQueries(dataSource);
+
+        await commands.CreateHabitAsync(new CreateHabitRequest
+        {
+            UserId = userId,
+            Name = "Exercise",
+            IsCompletable = true,
+            CompletionMethod = HabitCompletionMethod.SubHabits,
+        });
+
+        var habits = await queries.GetHabitsForUserAsync(userId);
+
+        Assert.Null(Assert.Single(habits).TotalCompleted);
+    }
+
+    [Fact]
+    public async Task GetHabitsForUserAsync_SubHabitsMethod_TotalCompletedIsEntryCount()
+    {
+        await using var db = fixture.CreateDbContext();
+        var dataSource = fixture.CreateDataSource();
+        var userId = await TestDataHelper.CreateTestUserAsync(db);
+        var commands = new HabitCommands(db);
+        var queries = new HabitQueries(dataSource);
+
+        var habit = await commands.CreateHabitAsync(new CreateHabitRequest
+        {
+            UserId = userId,
+            Name = "Exercise",
+            IsCompletable = true,
+            CompletionMethod = HabitCompletionMethod.SubHabits,
+        });
+
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: true, amount: null);
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: false, amount: null);
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: true, amount: null);
+
+        var habits = await queries.GetHabitsForUserAsync(userId);
+
+        // No entry has an Amount, so this falls back to a plain count of entries.
+        Assert.Equal(3, Assert.Single(habits).TotalCompleted);
+    }
+
+    [Fact]
+    public async Task GetHabitsForUserAsync_TotalMethod_TotalCompletedIsSumOfAmounts()
+    {
+        await using var db = fixture.CreateDbContext();
+        var dataSource = fixture.CreateDataSource();
+        var userId = await TestDataHelper.CreateTestUserAsync(db);
+        var commands = new HabitCommands(db);
+        var queries = new HabitQueries(dataSource);
+
+        var habit = await commands.CreateHabitAsync(new CreateHabitRequest
+        {
+            UserId = userId,
+            Name = "Dune",
+            IsCompletable = true,
+            CompletionMethod = HabitCompletionMethod.Total,
+            TargetValue = 412,
+            Unit = "page",
+            UnitPlural = "pages",
+            TargetType = HabitTargetType.OnceOff,
+        });
+
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: false, amount: 150);
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: false, amount: 200);
+
+        var habits = await queries.GetHabitsForUserAsync(userId);
+
+        Assert.Equal(350, Assert.Single(habits).TotalCompleted);
+    }
+
+    [Fact]
+    public async Task GetHabitsForUserAsync_MixedEntries_TotalCompletedSumsOnlyEntriesWithAmounts()
+    {
+        await using var db = fixture.CreateDbContext();
+        var dataSource = fixture.CreateDataSource();
+        var userId = await TestDataHelper.CreateTestUserAsync(db);
+        var commands = new HabitCommands(db);
+        var queries = new HabitQueries(dataSource);
+
+        // Simulate a habit reconfigured from SubHabits (no Amount) to Total (has Amount) -
+        // the legacy no-amount entry should be excluded from the sum, not counted as 0.
+        var habit = await commands.CreateHabitAsync(new CreateHabitRequest
+        {
+            UserId = userId,
+            Name = "Exercise",
+            IsCompletable = true,
+            CompletionMethod = HabitCompletionMethod.SubHabits,
+        });
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: true, amount: null);
+
+        await commands.UpdateHabitAsync(new UpdateHabitRequest
+        {
+            HabitId = habit.Id,
+            UserId = userId,
+            Name = "Exercise",
+            IsCompletable = true,
+            CompletionMethod = HabitCompletionMethod.Total,
+            TargetValue = 10,
+            Unit = "rep",
+            UnitPlural = "reps",
+            TargetType = HabitTargetType.PerEntry,
+        });
+        await commands.AddHabitEntryAsync(habit.Id, userId, isCompleted: false, amount: 7);
+
+        var habits = await queries.GetHabitsForUserAsync(userId);
+
+        Assert.Equal(7, Assert.Single(habits).TotalCompleted);
+    }
+
+    [Fact]
     public async Task GetHabitTreeAsync_UnknownHabit_ReturnsNull()
     {
         await using var db = fixture.CreateDbContext();

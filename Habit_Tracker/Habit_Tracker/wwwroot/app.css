@@ -195,6 +195,19 @@ h1:focus {
     fill: #333;
 }
 
+.habit-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.habit-total {
+    font-size: 0.7rem;
+    color: #666;
+    white-space: nowrap;
+}
+
 .add-btn {
     float: right;
     background-color: dodgerblue;
@@ -210,4 +223,15 @@ h1:focus {
 .app-modal {
     border-radius: 1rem;
     border: 1px solid rgba(150, 150, 150, 0.3);
+}
+
+@media (orientation: portrait) {
+    #add-habit-modal {
+        width: 80%;
+    }
+
+    #total-settings .col-4 {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
 }
